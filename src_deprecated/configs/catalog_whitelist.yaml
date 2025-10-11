@@ -1,0 +1,8 @@
+# 00_src/configs/catalog_whitelist.yaml
+
+
+gangnam: "https://library.gangnam.go.kr/intro/index.do"
+
+# 필요 시 아래에 점차 추가
+# seocho: "https://library.seocho.go.kr/search"
+# songpa: "https://www.splib.or.kr/search"

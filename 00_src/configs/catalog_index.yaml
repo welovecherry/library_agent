@@ -1,0 +1,16 @@
+# 정적 인덱스(Static Index)
+# - 각 구별 공공도서관 포털 URL과 검색창/버튼 셀렉터를 저장
+# - 여기서는 강남구만 우선 등록
+# - 향후 서초, 송파, 관악 등 확장 가능
+
+gangnam:
+  display_name: "강남구 통합도서관"
+  homepage: "https://library.gangnam.go.kr/intro/index.do"
+  search_box:
+    - "#mainSearchKeyword"
+    - "#searchKeyword"
+    - "#totalSearch"
+    - "input[name='keyword']"
+  submit_btn:
+    - "#mainSearchBtn"
+    - "#searchBtn"

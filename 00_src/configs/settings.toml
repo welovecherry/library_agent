@@ -1,0 +1,11 @@
+# 실행 환경 기본 설정
+
+[general]
+timezone = "Asia/Seoul"
+save_root = "00_src/data"
+retry_limit = 2
+
+[browser]
+wait_after_action = 2         # 클릭/입력 후 대기 초
+timeout_per_step = 60         # 타임아웃 제한 (초)
+telemetry = false             # .env에서 BROWSER_USE_TELEMETRY=false와 동일한 의미

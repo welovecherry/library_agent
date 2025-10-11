@@ -1,0 +1,14 @@
+# Adapter hints for library.gangnam.go.kr
+# - 강남 통합도서관은 랜딩 헤더 검색창이 #mainSearchKeyword / #mainSearchBtn임
+# - 결과 페이지에서는 #searchKeyword / #searchBtn을 쓰는 경우가 있음
+
+
+domain: library.gangnam.go.kr
+search_box_hints:
+  - "#mainSearchKeyword"   # 랜딩 헤더
+  - "#searchKeyword"       # 결과 페이지 내부
+  - "#totalSearch"         # 과거/다른 스킨 대비
+  - "input[name='keyword']"
+submit_hints:
+  - "#mainSearchBtn"       # 랜딩 헤더
+  - "#searchBtn"           # 결과 페이지 내부
