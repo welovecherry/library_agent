@@ -58,7 +58,7 @@ from browser_use import Agent
 from browser_use.llm import ChatBrowserUse
 
 agent = Agent(
-    task="Find the number of stars of the browser-use repo",
+    task="나는 현재 서울시 자곡로 11길 28에 살고 있다. 내 근처에 있는 도서관에서  '숨결이 바람 될 때' 라는 책이 대출 가능한지 확인 하려고 한다. 니가 알아서 검색해서 알려 줘.",
     llm=ChatBrowserUse(),
 )
 agent.run_sync()
