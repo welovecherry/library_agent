@@ -20,4 +20,6 @@ def llm_from_settings() -> ChatOpenAI:
     model = os.getenv("LLM_MODEL", "gpt-5-mini")
     api_key: Optional[str] = os.getenv("LLM_API_KEY")
 
+    # if api_key:
     return ChatOpenAI(model=model, api_key=api_key)
+    # return ChatOpenAI(model=model)

@@ -18,6 +18,7 @@ def get_logger(
 
     logger = logging.getLogger(name)
     if logger.handlers:
+        # 이미 초기화된 로거 재사용
         return logger
 
     logger.setLevel(level)
