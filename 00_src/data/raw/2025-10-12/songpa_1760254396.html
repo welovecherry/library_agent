@@ -1,0 +1,396 @@
+Code: (function(){
+     try {
+       const html = document.documentElement ? document.documentElement.outerHTML : '';
+       return html ? html.slice(0, 10000) : '';
+     } catch (e) {
+       return 'ERROR:' + e.message;
+     }
+   })()
+
+Result: <html lang="ko" class="fp-enabled" style="overflow: visible; height: initial;"><head>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="송파구통합도서관">
+<meta name="description" content="송파구통합도서관정보 및 도서검색 제공">
+<meta name="generator" content="jnet co. ltd.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="송파구통합도서관">
+<meta property="og:description" content="송파구통합도서관 정보 및 도서검색 제공">
+<meta property="og:image" content="/include/image/common/og1.jpg">
+<meta property="og:url" content="http://www.splib.or.kr/intro/index.do">
+<link rel="canonical" href="http://www.splib.or.kr/intro/index.do">
+<title>송파구통합도서관</title>
+<link rel="shortcut icon" href="/include/image/common/ico_sns_favicon.png">
+<link rel="stylesheet" href="/include/css/intro/main.css?v=20230511">
+<link rel="stylesheet" href="/include/js/jquery.fullpage.css">
+<link rel="stylesheet" href="/include/js/swiper.min.css">
+<script src="/include/js/jquery-1.12.4.min.js"></script>
+<script src="/include/js/jquery.fullpage.js"></script>
+<script src="/include/js/jquery.slider.js"></script>
+<script src="/include/js/jquery.tab.js"></script>
+<script src="/include/js/swiper.min.js"></script>
+<script src="/include/js/gnb.js"></script>
+<script src="/include/js/main.js"></script>
+<script src="/include/js/common.js"></script>
+
+<script>
+	$(function(){
+		$("#eventSearchBtn").click(fnEventSearch);
+	});
+
+	function fnEventSearch(){
+		var manageCd = $('#manageCd').val();
+		var eventTargetCd = $('#eventTargetCd').val();
+		$("#eventArea").load("/intro/main/include/eventList.do?manageCd=" + manageCd + "&eventTargetCd=" + eventTargetCd);
+	}
+</script>
+<script type="text/javascript" async="" src="https://ssl.pstatic.net/melona/libs/gfp-nac-module/synchronizer.js"></script></head>
+<body class="fp-responsive fp-viewing-0" style="overflow: visible; height: initial;">
+
+<!-- skip -->
+<ul class="skip">
+	<li><a href="#fullpage">본문 바로가기</a></li>
+	<li><a href="#gnb">주메뉴 바로가기</a></li>
+</ul>
+<!-- skip -->
+
+<!-- wrap -->
+<div id="wrap">
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- 레이어팝업 -->
+
+
+<!-- 레이어팝업 -->
+
+<script>
+	function fnTodayClosePop(idx) {
+		setCookie("introPopup"+idx, "2025-10-12", 1);
+		fnCloseMainPop(idx);
+	}
+
+	function fnCloseMainPop(id){
+		document.getElementById("mainLayerPop"+id).style.display = "none";
+	}
+</script>
+
+
+	<!-- 상단팝업 -->
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- top popup - 공지슬라이드 -->
+
+<!-- //top popup - 공지슬라이드 -->
+
+
+<script>
+	$(function(){
+		var $topPopupClose = $(".topPopupcloseBtn");
+		$topPopupClose.on("click",function(){
+			var $area = $(this).parents(".topPopupWrap");
+			$area.slideUp(300);
+			$("#header").stop().animate({
+				"top": "0"
+			},300);
+			return false;
+		});
+	});
+	var swiper = new Swiper(".topSwiper", {
+		autoplay: {
+			delay: 5000,
+			disableOnInteraction: false,
+		},
+		slidesPerView: 1,
+		spaceBetween: 50,
+		breakpoints: {
+		640: {
+			spaceBetween: 20,
+		},
+		1024: {
+			spaceBetween: 30,
+		},
+		1240: {
+			spaceBetween: 40,
+		},
+		},
+		observer: true,
+		observeParents: true,
+	});
+
+	// 버튼개수
+    var topNoticeGroup = $(".topNoticeSlide");
+    var topNoticeGroupNum = $(".topNoticeSlide .swiper-slide").length;
+    switch(topNoticeGroupNum) {
+        case 1:
+            topNoticeGroup.addClass("num1");
+            break;
+        case 2:
+            topNoticeGroup.addClass("num2");
+            break;
+        case 3:
+            topNoticeGroup.addClass("num3");
+            break;
+        default:
+            break;
+    }
+
+	function fnTopPopupClose() {
+		console.log("dd");
+		$("#topPopupWrap").css("height",0).hide();
+		if($("#topPopupCheck").is(":checked")){
+			setCookie("introTopPopup", "2025-10-12", 1);
+		}
+	}
+</script>
+	<!-- //상단팝업 -->
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<header id="header" class="off">
+	<script type="text/javascript">
+		$(function(){
+			$(".btnTopSearch").click(function(){
+				$("#popularSearchWords").load("/intro/include/popularSearchWords.do");
+			});
+		});
+	</script>
+
+	<a href="#back" id="blackBG"><span class="blind">이전으로 돌아가기</span></a>
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+
+	$(function(){
+		// 로그인시 모바일 회원정보 바코드
+		$(".barcodePopBtn").click(function(){
+			if(isEmpty("")) {
+				alert("로그인 후 이용가능합니다.");
+				//$(".barcodePop").css("display","none");
+				location.href='/intro/program/memberLogin.do';
+				return false;
+			}else if(isEmpty('')){
+				alert("도서관 대출회원만 이용가능합니다.");
+				//$(".barcodePop").css("display","none");
+				return false;
+			}
+			$(".barcodePop").css("display","block");
+
+		});
+
+	    /* 모바일 회원증 팝업 닫기 */
+	    $(".barcodeClose").click(function(){
+	        $(".barcodePop").css("display","none");
+	    });
+	});
+
+</script>
+
+<!-- 모바일 회원증 팝업 -->
+
+<!-- //모바일 회원증 팝업 -->
+
+<div id="snb">
+	<div class="siteUtilGroup"><div id="libraryShortcut" class="libSite dropdown">
+			<a href="#open" class="button" title="축소됨">도서관 바로가기</a>
+			<ul>
+				
+					
+				
+					
+						<li><a href="/intro/index.do">송파구통합도서관</a></li>
+					
+				
+					
+						<li><a href="/spjlib/index.do">송파글마루도서관</a></li>
+					
+				
+					
+						<li><a href="/spclib/index.do">송파어린이도서관</a></li>
+					
+				
+					
+						<li><a href="/spwlib/index.do">송파위례도서관</a></li>
+					
+				
+					
+						<li><a href="/spglib/index.do">거마도서관</a></li>
+					
+				
+					
+						<li><a href="/spdlib/index.do">돌마리도서관</a></li>
+					
+				
+					
+						<li><a href="/sp1lib/index.do">소나무언덕1호도서관</a></li>
+					
+				
+					
+						<li><a href="/sp2lib/index.do">소나무언덕2호도서관</a></li>
+					
+				
+					
+						<li><a href="/sp3lib/index.do">소나무언덕3호도서관</a></li>
+					
+				
+					
+						<li><a href="/sp4lib/index.do">소나무언덕4호도서관</a></li>
+					
+				
+					
+						<li><a href="/spmlib/index.do">소나무언덕잠실본동도서관</a></li>
+					
+				
+					
+						<li><a href="/spelib/index.do">송파어린이영어도서관</a></li>
+					
+				
+					
+						<li><a href="/spalib/index.do">가락몰도서관</a></li>
+					
+				
+					
+						<li><a href="/spslib/index.do">송이골작은도서관</a></li>
+					
+				
+			</ul>
+		</div><div id="siteMenu" class="siteMenu">
+			<ul class="sitePc">
+				
+						<li class="login"><a href="/intro/program/memberLogin.do?returnUrl=aHR0cHM6Ly93d3cuc3BsaWIub3Iua3IvaW50cm8vaW5kZXguZG8=">로그인</a></li>
+						<li class="join"><a href="/intro/program/memberJoinIntro.do">회원가입</a></li>
+					
+				<li class="sitemap"><a href="/intro/program/siteMap.do">사이트맵</a></li>
+				
+						<li class="youtube"><a href="https://www.youtube.com/channel/UCoPG3-k7wanYwXEh4LlJORA" target="_blank" title="유튜브 새창열림"><span class="blind">유튜브 바로가기</span></a></li>
+					
+				<!-- <li class="sam"><a href="https://www.songpa.go.kr/ssem/" target="_blank" title="새창열림"><span class="blind">송파쌤 바로가기</span></a></li> -->
+			</ul>
+			<ul class="siteM">
+				
+						<li class="login"><a href="/intro/program/memberLogin.do?returnUrl=aHR0cHM6Ly93d3cuc3BsaWIub3Iua3IvaW50cm8vaW5kZXguZG8=">로그인</a></li>
+						<li class="join"><a href="/intro/program/memberJoinIntro.do">회원가입</a></li>
+					
+			</ul>
+		</div>
+		
+
+		
+	</div>
+</div>
+
+
+	<div class="headerInner clearfix">
+		<h1 id="logo"><em class="intro"><a href="/"><span class="blind">다시 뛰는 송파! 참의와 혁신의 구정</span></a></em><a href="/intro/index.do"><span class="blind">송파구통합도서관</span></a></h1>
+		<a href="#open" id="mobileIndexOpen" title="메뉴 열기"><span><i></i><i></i><i></i></span></a>
+		<a href="#search" class="btnTopSearch mobileTopSearch"><span><span class="blind">검색창 비활성화</span></span></a>
+	</div>
+
+	<nav id="gnbNav" class="gnbNav">
+		<div id="mobileIndexClose"><a href="#close"><span class="blind">메뉴 닫기</span></a></div>
+		<ul id="gnb" class="gnb" tabindex="0">
+			
+					<li id="gnb1"> <a href="/intro/menu/10003/program/30001/plusSearchSimple.do"><span>자료검색</span></a> 
+ <ul> 
+  <li id="gnb1_1"> <a href="/intro/menu/10003/program/30001/plusSearchSimple.do"><span>통합검색</span></a> 
+   <ul class="MkSub"> 
+    <li id="gnb1_1_1"> <a href="/intro/menu/10003/program/30001/plusSearchSimple.do"><span>간략검색</span></a> </li> 
+    <li id="gnb1_1_2"> <a href="/intro/menu/10004/program/30002/plusSearchDetail.do"><span>상세검색</span></a> </li> 
+   </ul> </li> 
+  <li id="gnb1_2"> <a href="/intro/menu/10005/program/30003/plusSearchKdc.do"><span>주제별검색</span></a> </li> 
+  <li id="gnb1_3"> <a href="/intro/menu/10006/program/30004/plusSearchNewResultList.do"><span>신착자료검색</span></a> </li> 
+  <li id="gnb1_4"> <a href="/intro/menu/10008/program/30005/plusLoanBestList.do"><span>대출베스트</span></a> 
+   <ul class="MkSub"> 
+    <li id="gnb1_4_1"> <a href="/intro/menu/10008/program/30005/plusLoanBestList.do"><span>기간별대출베스트</span></a> </li> 
+    <li id="gnb1_4_2"> <a href="/intro/menu/10009/program/30006/plusLoanBestSubjectList.do"><span>주제별대출베스트</span></a> </li> 
+    <li id="gnb1_4_3"> <a href="/intro/menu/10010/program/30007/plusLoanBestAgesList.do"><span>연령별대출베스트</span></a> </li> 
+   </ul> </li> 
+  <li id="gnb1_5"> <a href="/intro/menu/10012/program/30008/recommendBookList.do"><span>추천도서</span></a> 
+   <ul class="MkSub"> 
+    <li id="gnb1_5_1"> <a href="/intro/menu/10012/program/30008/recommendBookList.do"><span>사서추천도서</span></a> </li> 
+    <li id="gnb1_5_2"> <a href="/intro/menu/10013/program/30009/bookEmpathizeList.do"><span>시민추천도서</span></a> </li> 
+    <li id="gnb1_5_3"> <a href="/intro/menu/10014/program/30010/aiRecommendBook.do"><span>AI추천도서</span></a> </li> 
+    <li id="gnb1_5_4"> <a href="/intro/menu/11513/program/30065/recommendBook2List.do"><span>도서 프리뷰 서비스</span></a> </li> 
+   </ul> </li> 
+  <li id="gnb1_6"> <a href="/intro/menu/10015/program/30011/curationList.do"><span>북큐레이션</span></a> </li> 
+  <li id="gnb1_7"> <a href="/intro/menu/10017/contents/40001/contents.do"><span>스마트도서관</span></a> 
+   <ul class="MkTab"> 
+    <li id="gnb1_7_1"> <a href="/intro/menu/10017/contents/40001/contents.do"><span>이용안내</span></a> </li> 
+    <li id="gnb1_7_2"> <a href="/intro/menu/10018/program/30012/plusSmartLibrarySearchResultList.do"><span>자료검색</span></a> </li> 
+   </ul> </li> 
+  <li id="gnb1_8"> <a href="/intro/menu/10019/contents/40002/contents.do"><span>전자도서관</span></a> </li> 
+ </ul> </li> 
+<li id="gnb2"> <a href="/intro/menu/10022/cont
