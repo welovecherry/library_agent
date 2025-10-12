@@ -166,16 +166,13 @@ STEPS
        document.querySelector('{btn_selectors[0]}')?.click();
        document.querySelector('{btn_selectors[-1]}')?.click();
 
-5) Adaptive wait (total ≤ 15s): check any of ['.searchList','#content','.result-list','.board-list'] has non-empty text.
-   Use waits [1500,3000,5000,7500,10000] ms; stop early if found.
-
-6) Evaluate HTML (exact string return):
+5) Evaluate HTML (exact string return):
    evaluate: (function(){{try{{return document.documentElement?document.documentElement.outerHTML:'';}}catch(e){{return 'ERROR:'+e.message;}}}})()
 
-7) Evaluate TEXT (exact string return):
+6) Evaluate TEXT (exact string return):
    evaluate: (function(){{try{{return document.body?document.body.innerText:'';}}catch(e){{return 'ERROR:'+e.message;}}}})()
 
-8) Immediately call done with a one-line summary like "ok".
+7) Immediately call done with a one-line summary like "ok".
 """
         agent = Agent(task=task_text, llm=llm)
 
