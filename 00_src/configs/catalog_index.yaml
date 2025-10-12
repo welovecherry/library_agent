@@ -14,3 +14,9 @@ gangnam:
   submit_btn:
     - "#mainSearchBtn"
     - "#searchBtn"
+
+
+songpa:
+  homepage: "https://www.songpa.go.kr/library/main/main.jsp"
+  search_box: ["#searchKeyword", "#q", "input[name='searchKey']", "input[type='text']"]
+  submit_btn: ["#searchBtn", "button.searchBtn", ".btn_search"]
