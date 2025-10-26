@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 import urllib.parse as _urlparse  # 도메인 추출용
+from datetime import datetime
 
 # Agent 모드용 라이브러리 (로컬 브라우저 직접 제어)
 try:
@@ -48,50 +49,39 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
     # 텔레메트리 비활성(불필요 백오프 방지)
     os.environ.setdefault("POSTHOG_DISABLED", "1")
 
-    # 브라우저 제한(필요 시 state로 받기)
-    default_allowed = [
-        "*.gangnam.go.kr",
-        "*.seocholib.or.kr",
-        "*.splib.or.kr",
-    ]
-    allowed = state.get("allowed_domains") or default_allowed
-
-    # 한국어 주석: 홈 URL에서 도메인을 추출해 allowed_domains를 더 타이트하게 설정
+    # 브라우저 제한: 홈 URL에서 도메인 추출
     def _derive_allowed_from_home(url: str) -> List[str]:
         try:
             netloc = _urlparse.urlparse(url).netloc
             if netloc and "." in netloc:
                 base = netloc.split(":")[0]
-                # 예: library.gangnam.go.kr -> *.gangnam.go.kr 로 축소 허용
                 parts = base.split(".")
-                if len(parts) >= 3:
-                    return [f"*.{'.'.join(parts[-3:])}"]
+                if len(parts) >= 2:
+                    return [base, f"*.{'.'.join(parts[-2:])}"]
                 return [base]
         except Exception:
             pass
-        return []
+        return ["*.go.kr", "*.or.kr"]  # fallback
+    
+    allowed = state.get("allowed_domains") or _derive_allowed_from_home(home)
 
-    derived = _derive_allowed_from_home(home)
-    if derived:
-        allowed = derived
-
-    # 브라우저 생성(보여주기 모드)
+    # 브라우저 생성
     browser = None
     if Browser is not None:
         try:
-            # 한국어 주석: 액션 간 최소 대기 등 장시간 대기 방지용 파라미터 추가
             browser = Browser(
                 headless=False,
                 allowed_domains=allowed,
                 window_size={"width": 1280, "height": 900},
                 keep_alive=True,
-                minimum_wait_page_load_time=0.3,
-                wait_for_network_idle_page_load_time=0.5,
-                wait_between_actions=0.3,
+                minimum_wait_page_load_time=0.1,
+                wait_for_network_idle_page_load_time=0.3,
+                wait_between_actions=0.2,
                 highlight_elements=False,
-                prohibited_domains=["*.posthog.com", "eu.i.posthog.com"],
             )
-        except Exception:
+            print(f"[search_book] Browser 생성 완료")
+        except Exception as e:
+            print(f"[search_book] ❌ Browser 생성 실패: {e}")
             browser = None
 
     # LLM (소형 모델)
@@ -99,7 +89,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
         # 라이브러리 미설치 시 계획만 반환
         task_preview = _build_browser_use_task(home, title, {}, [30, 60, 90])
         return {**state, "ok": False, "result_hint": "plan_only", "page_url": None, "log": ["browser_use Agent 미설치"], "task_prompt": task_preview}
-    llm = ChatOpenAI(model=state.get("llm_model", "gpt-5-mini"))
+    llm = ChatOpenAI(model=state.get("llm_model", "gpt-5"))
 
     # 1단계: 규칙 기반(아주 짧은 태스크, max_steps=8)
     task_rules = _build_browser_use_task(home, title, {}, [30, 60, 90])
@@ -107,29 +97,149 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
 
     import asyncio
     try:
-        # 한국어 주석: 규칙 기반 시도 단계 수 기본값 8로 축소
-        history1 = asyncio.run(agent_rules.run(max_steps=int(state.get("max_steps_rules", 8))))
-        # 성공 가정: 규칙 태스크에서 URL 이동/제출 신호면 충분하다고 판단
-        page_url = None
-        try:
-            if getattr(agent_rules, "browser", None) and getattr(agent_rules.browser, "current_url", None):
-                page_url = agent_rules.browser.current_url  # type: ignore
-        except Exception:
-            pass
-        return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "used_frame": None, "markers": [], "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"]}
+        # asyncio 내에서 CDP/URL/HTML 추출하는 함수
+        async def run_and_extract():
+            history = await agent_rules.run(max_steps=int(state.get("max_steps_rules", 8)))
+            
+            # SPA 로딩 대기 (여유롭게)
+            await asyncio.sleep(5.0)
+            print(f"[search_book] SPA 로딩 대기 완료 (5초)")
+            
+            # CDP endpoint & page_url 추출
+            page_url = None
+            cdp = None
+            
+            if browser:
+                try:
+                    cdp = browser.cdp_url
+                    print(f"[search_book] CDP: {cdp}")
+                except Exception as e:
+                    print(f"[search_book] CDP 추출 실패: {e}")
+                
+                try:
+                    page_url = await browser.get_current_page_url()
+                    print(f"[search_book] URL: {page_url}")
+                except Exception as e:
+                    print(f"[search_book] URL 추출 실패: {e}")
+            
+            # HTML 추출 및 저장
+            saved_path = None
+            html_size = 0
+            
+            if browser and hasattr(browser, 'cdp_client') and browser.cdp_client:
+                try:
+                    print(f"[search_book] HTML 추출 시작...")
+                    result = await browser.cdp_client.send.Runtime.evaluate(
+                        params={
+                            "expression": "document.documentElement.outerHTML",
+                            "returnByValue": True
+                        },
+                        session_id=browser.agent_focus.session_id
+                    )
+                    html_content = result.get("result", {}).get("value", "")
+                    
+                    if html_content:
+                        # 저장 경로 생성
+                        today = datetime.now().strftime("%Y-%m-%d")
+                        timestamp = int(datetime.now().timestamp())
+                        dir_path = f"00_src/data/raw/{today}"
+                        os.makedirs(dir_path, exist_ok=True)
+                        
+                        filename = f"{place}_{timestamp}_results.html"
+                        saved_path = os.path.join(dir_path, filename)
+                        
+                        # 파일 저장
+                        with open(saved_path, "w", encoding="utf-8") as f:
+                            f.write(html_content)
+                        
+                        html_size = len(html_content)
+                        print(f"[search_book] ✅ HTML 저장 완료: {saved_path} ({html_size:,} bytes)")
+                    else:
+                        print(f"[search_book] ⚠️ HTML 내용이 비어있음")
+                        
+                except Exception as e:
+                    print(f"[search_book] ❌ HTML 추출/저장 실패: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            return history, page_url, cdp, saved_path, html_size
+        
+        # asyncio 실행
+        history1, page_url, cdp_endpoint, saved_html_path, html_size = asyncio.run(run_and_extract())
+        
+        return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"]}
     except Exception as e1:
         # 2단계: 유연 태스크(한 번만), max_steps=15
         task_llm = f"수정된 시도: 위와 동일하지만 다른 경로도 허용. 실패 시 즉시 종료.\n" + _build_browser_use_task(home, title, {}, [30, 60, 90])
         agent_llm = Agent(task=task_llm, llm=llm, browser=browser) if browser else Agent(task=task_llm, llm=llm)
         try:
-            # 한국어 주석: LLM 기반 시도 단계 수 기본값 15로 축소
-            history2 = asyncio.run(agent_llm.run(max_steps=int(state.get("max_steps_llm", 15))))
-            page_url = None
-            try:
-                if getattr(agent_llm, "browser", None) and getattr(agent_llm.browser, "current_url", None):
-                    page_url = agent_llm.browser.current_url  # type: ignore
-            except Exception:
-                pass
-            return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "used_frame": None, "markers": [], "log": [f"llm_steps={len(history2) if isinstance(history2, list) else 'unknown'}", str(e1)]}
+            # asyncio 내에서 CDP/URL/HTML 추출하는 함수 (LLM 경로)
+            async def run_and_extract_llm():
+                history = await agent_llm.run(max_steps=int(state.get("max_steps_llm", 15)))
+                
+                # SPA 로딩 대기 (여유롭게)
+                await asyncio.sleep(5.0)
+                print(f"[search_book LLM] SPA 로딩 대기 완료 (5초)")
+                
+                # CDP endpoint & page_url 추출
+                page_url = None
+                cdp = None
+                
+                if browser:
+                    try:
+                        cdp = browser.cdp_url
+                        print(f"[search_book LLM] CDP: {cdp}")
+                    except Exception as e:
+                        print(f"[search_book LLM] CDP 추출 실패: {e}")
+                    
+                    try:
+                        page_url = await browser.get_current_page_url()
+                        print(f"[search_book LLM] URL: {page_url}")
+                    except Exception as e:
+                        print(f"[search_book LLM] URL 추출 실패: {e}")
+                
+                # HTML 추출 및 저장
+                saved_path = None
+                html_size = 0
+                
+                if browser and hasattr(browser, 'cdp_client') and browser.cdp_client:
+                    try:
+                        print(f"[search_book LLM] HTML 추출 시작...")
+                        result = await browser.cdp_client.send.Runtime.evaluate(
+                            params={
+                                "expression": "document.documentElement.outerHTML",
+                                "returnByValue": True
+                            },
+                            session_id=browser.agent_focus.session_id
+                        )
+                        html_content = result.get("result", {}).get("value", "")
+                        
+                        if html_content:
+                            today = datetime.now().strftime("%Y-%m-%d")
+                            timestamp = int(datetime.now().timestamp())
+                            dir_path = f"00_src/data/raw/{today}"
+                            os.makedirs(dir_path, exist_ok=True)
+                            
+                            filename = f"{place}_{timestamp}_results.html"
+                            saved_path = os.path.join(dir_path, filename)
+                            
+                            with open(saved_path, "w", encoding="utf-8") as f:
+                                f.write(html_content)
+                            
+                            html_size = len(html_content)
+                            print(f"[search_book LLM] ✅ HTML 저장 완료: {saved_path} ({html_size:,} bytes)")
+                        else:
+                            print(f"[search_book LLM] ⚠️ HTML 내용이 비어있음")
+                            
+                    except Exception as e:
+                        print(f"[search_book LLM] ❌ HTML 추출/저장 실패: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                return history, page_url, cdp, saved_path, html_size
+            
+            history2, page_url, cdp_endpoint, saved_html_path, html_size = asyncio.run(run_and_extract_llm())
+            
+            return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"llm_steps={len(history2) if isinstance(history2, list) else 'unknown'}", str(e1)]}
         except Exception as e2:
-            return {**state, "ok": False, "result_hint": "execution_error", "page_url": None, "used_frame": None, "markers": [], "log": ["rules_failed", str(e1), "llm_failed", str(e2)]}
+            return {**state, "ok": False, "result_hint": "execution_error", "page_url": None, "cdp_endpoint": None, "saved_html_path": None, "html_size": 0, "used_frame": None, "markers": [], "log": ["rules_failed", str(e1), "llm_failed", str(e2)]}
