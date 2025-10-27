@@ -101,8 +101,11 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
         async def run_and_extract():
             history = await agent_rules.run(max_steps=int(state.get("max_steps_rules", 8)))
             
-            # SPA 로딩 대기 (여유롭게)
-            await asyncio.sleep(5.0)
+            # SPA 로딩 완료 대기: network idle or main content visible
+            try:
+                await browser.wait_for_network_idle(timeout=10000)
+            except Exception:
+                await asyncio.sleep(1.5)
             print(f"[search_book] SPA 로딩 대기 완료 (5초)")
             
             # CDP endpoint & page_url 추출
@@ -177,8 +180,11 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
             async def run_and_extract_llm():
                 history = await agent_llm.run(max_steps=int(state.get("max_steps_llm", 15)))
                 
-                # SPA 로딩 대기 (여유롭게)
-                await asyncio.sleep(5.0)
+                # SPA 로딩 완료 대기: network idle or main content visible
+                try:
+                    await browser.wait_for_network_idle(timeout=10000)
+                except Exception:
+                    await asyncio.sleep(1.5)
                 print(f"[search_book LLM] SPA 로딩 대기 완료 (5초)")
                 
                 # CDP endpoint & page_url 추출
