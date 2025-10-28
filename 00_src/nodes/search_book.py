@@ -26,6 +26,9 @@ except Exception:
 
 SELECTORS_PATH = "00_src/configs/selectors.yaml"
 
+# Quick SPA readiness keywords for Korean library sites
+SPA_READY_KEYWORDS = ["검색결과", "소장", "대출", "관심도서", "상세보기"]
+
 def _build_browser_use_task(catalog_home_url: str, title: str, hint: Dict[str, Any], backoff: List[int]) -> str:
     """DOM 신호 기반: 보이면 즉시 진행, 보이지 않으면 짧게 재시도 후 종료."""
     return f"""
@@ -43,6 +46,9 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
     home = str(state.get("catalog_home_url", "")).strip()
     title = str(state.get("title", "")).strip()
     place = str(state.get("place", "")).strip()
+    if not place:
+        # fallback: try to infer later from saved filename; still keep non-empty token for downstream
+        place = state["place"] = "unknown"
     if not home or not title:
         return {**state, "ok": False, "result_hint": "invalid_input", "page_url": None}
 
@@ -74,8 +80,8 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                 allowed_domains=allowed,
                 window_size={"width": 1280, "height": 900},
                 keep_alive=True,
-                minimum_wait_page_load_time=0.1,
-                wait_for_network_idle_page_load_time=0.3,
+                minimum_wait_page_load_time=0.5,
+                wait_for_network_idle_page_load_time=0.8,
                 wait_between_actions=0.2,
                 highlight_elements=False,
             )
@@ -89,7 +95,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
         # 라이브러리 미설치 시 계획만 반환
         task_preview = _build_browser_use_task(home, title, {}, [30, 60, 90])
         return {**state, "ok": False, "result_hint": "plan_only", "page_url": None, "log": ["browser_use Agent 미설치"], "task_prompt": task_preview}
-    llm = ChatOpenAI(model=state.get("llm_model", "gpt-5"))
+    llm = ChatOpenAI(model=state.get("llm_model", "gpt-5-mini"))
 
     # 1단계: 규칙 기반(아주 짧은 태스크, max_steps=8)
     task_rules = _build_browser_use_task(home, title, {}, [30, 60, 90])
@@ -101,12 +107,32 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
         async def run_and_extract():
             history = await agent_rules.run(max_steps=int(state.get("max_steps_rules", 8)))
             
-            # SPA 로딩 완료 대기: network idle or main content visible
+            # SPA 로딩 완료 대기: 네트워크 아이들 + 본문 키워드 등장 대기(최대 10s)
             try:
                 await browser.wait_for_network_idle(timeout=10000)
             except Exception:
                 await asyncio.sleep(1.5)
-            print(f"[search_book] SPA 로딩 대기 완료 (5초)")
+
+            # 추가: 본문에 라이브러리 결과 키워드가 나타날 때까지 폴링(최대 10s)
+            ready = False
+            for _ in range(20):  # 20 * 0.5s = 10s
+                try:
+                    eval_result = await browser.cdp_client.send.Runtime.evaluate(
+                        params={
+                            "expression": "document.body ? document.body.innerText : ''",
+                            "returnByValue": True
+                        },
+                        session_id=browser.agent_focus.session_id
+                    )
+                    body_text = (eval_result.get("result", {}) or {}).get("value", "") or ""
+                    if any(k in body_text for k in SPA_READY_KEYWORDS):
+                        ready = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+
+            print(f"[search_book] SPA 로딩 대기 완료 ({'성공' if ready else '타임아웃'})")
             
             # CDP endpoint & page_url 추출
             page_url = None
@@ -155,6 +181,20 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                         with open(saved_path, "w", encoding="utf-8") as f:
                             f.write(html_content)
                         
+                        # 메타데이터 사이드카 저장(.meta.json)
+                        try:
+                            meta = {
+                                "place": place,
+                                "page_url": page_url,
+                                "captured_at": datetime.now().isoformat(timespec="seconds"),
+                                "cdp_endpoint": cdp
+                            }
+                            with open(saved_path + ".meta.json", "w", encoding="utf-8") as mf:
+                                import json as _json
+                                mf.write(_json.dumps(meta, ensure_ascii=False))
+                        except Exception as _e:
+                            print(f"[search_book] 메타 저장 경고: {_e}")
+                        
                         html_size = len(html_content)
                         print(f"[search_book] ✅ HTML 저장 완료: {saved_path} ({html_size:,} bytes)")
                     else:
@@ -170,7 +210,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
         # asyncio 실행
         history1, page_url, cdp_endpoint, saved_html_path, html_size = asyncio.run(run_and_extract())
         
-        return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"]}
+        return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"], "place": place}
     except Exception as e1:
         # 2단계: 유연 태스크(한 번만), max_steps=15
         task_llm = f"수정된 시도: 위와 동일하지만 다른 경로도 허용. 실패 시 즉시 종료.\n" + _build_browser_use_task(home, title, {}, [30, 60, 90])
@@ -180,12 +220,32 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
             async def run_and_extract_llm():
                 history = await agent_llm.run(max_steps=int(state.get("max_steps_llm", 15)))
                 
-                # SPA 로딩 완료 대기: network idle or main content visible
+                # SPA 로딩 완료 대기: 네트워크 아이들 + 본문 키워드 등장 대기(최대 10s)
                 try:
                     await browser.wait_for_network_idle(timeout=10000)
                 except Exception:
                     await asyncio.sleep(1.5)
-                print(f"[search_book LLM] SPA 로딩 대기 완료 (5초)")
+
+                # 추가: 본문에 라이브러리 결과 키워드가 나타날 때까지 폴링(최대 10s)
+                ready = False
+                for _ in range(20):  # 20 * 0.5s = 10s
+                    try:
+                        eval_result = await browser.cdp_client.send.Runtime.evaluate(
+                            params={
+                                "expression": "document.body ? document.body.innerText : ''",
+                                "returnByValue": True
+                            },
+                            session_id=browser.agent_focus.session_id
+                        )
+                        body_text = (eval_result.get("result", {}) or {}).get("value", "") or ""
+                        if any(k in body_text for k in SPA_READY_KEYWORDS):
+                            ready = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+
+                print(f"[search_book LLM] SPA 로딩 대기 완료 ({'성공' if ready else '타임아웃'})")
                 
                 # CDP endpoint & page_url 추출
                 page_url = None
@@ -232,6 +292,20 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                             with open(saved_path, "w", encoding="utf-8") as f:
                                 f.write(html_content)
                             
+                            # 메타데이터 사이드카 저장(.meta.json)
+                            try:
+                                meta = {
+                                    "place": place,
+                                    "page_url": page_url,
+                                    "captured_at": datetime.now().isoformat(timespec="seconds"),
+                                    "cdp_endpoint": cdp
+                                }
+                                with open(saved_path + ".meta.json", "w", encoding="utf-8") as mf:
+                                    import json as _json
+                                    mf.write(_json.dumps(meta, ensure_ascii=False))
+                            except Exception as _e:
+                                print(f"[search_book LLM] 메타 저장 경고: {_e}")
+                            
                             html_size = len(html_content)
                             print(f"[search_book LLM] ✅ HTML 저장 완료: {saved_path} ({html_size:,} bytes)")
                         else:
@@ -246,6 +320,6 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
             
             history2, page_url, cdp_endpoint, saved_html_path, html_size = asyncio.run(run_and_extract_llm())
             
-            return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"llm_steps={len(history2) if isinstance(history2, list) else 'unknown'}", str(e1)]}
+            return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"llm_steps={len(history2) if isinstance(history2, list) else 'unknown'}", str(e1)], "place": place}
         except Exception as e2:
             return {**state, "ok": False, "result_hint": "execution_error", "page_url": None, "cdp_endpoint": None, "saved_html_path": None, "html_size": 0, "used_frame": None, "markers": [], "log": ["rules_failed", str(e1), "llm_failed", str(e2)]}

@@ -310,6 +310,25 @@ def parse_html(state: Dict[str, Any]) -> Dict[str, Any]:
         out["parsed_books"] = parsed
         out["parse_success"] = len(parsed) > 0
         out["parse_error"] = None if out["parse_success"] else "No item blocks parsed (DOM mode)."
+
+        # ── 신규: 함수 모드에서도 저장 수행 (그래프/CLI 동작 통일) ──
+        saved = []
+        out_json = state.get("out_json") or out.get("out_json")
+        out_jsonl = state.get("out_jsonl") or out.get("out_jsonl")
+        try:
+            if out_json:
+                _dump_json(out_json, out["parse_success"], out["parse_error"], parsed)
+                saved.append(("json", out_json))
+            if out_jsonl:
+                _dump_jsonl(out_jsonl, parsed)
+                saved.append(("jsonl", out_jsonl))
+        except Exception as e:
+            # 저장 중 오류는 parse_error에 덧붙여 기록하되, 파싱 결과 자체는 유지
+            prev = out.get("parse_error")
+            msg = f"SaveError({type(e).__name__}): {e}"
+            out["parse_error"] = f"{prev} | {msg}" if prev else msg
+        out["saved"] = saved
+
         return out
 
     except Exception as e:
