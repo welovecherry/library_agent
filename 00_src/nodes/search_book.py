@@ -52,8 +52,11 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
     if not home or not title:
         return {**state, "ok": False, "result_hint": "invalid_input", "page_url": None}
 
-    # 텔레메트리 비활성(불필요 백오프 방지)
-    os.environ.setdefault("POSTHOG_DISABLED", "1")
+    # 텔레메트리 비활성(불필요 백오프 방지) - 모든 변수 강제 설정
+    os.environ["POSTHOG_DISABLED"] = "1"
+    os.environ["ANONYMIZED_TELEMETRY"] = "false"
+    os.environ["TELEMETRY_DISABLED"] = "1"
+    os.environ["DO_NOT_TRACK"] = "1"
 
     # 브라우저 제한: 홈 URL에서 도메인 추출
     def _derive_allowed_from_home(url: str) -> List[str]:
@@ -205,6 +208,15 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                     import traceback
                     traceback.print_exc()
             
+            # 브라우저 종료 (async 컨텍스트 내부에서)
+            if browser:
+                try:
+                    print(f"[search_book] 브라우저 종료 중...")
+                    browser.close()
+                    print(f"[search_book] ✅ 브라우저 종료 완료")
+                except Exception as e:
+                    print(f"[search_book] ⚠️ 브라우저 종료 경고: {e}")
+            
             return history, page_url, cdp, saved_path, html_size
         
         # asyncio 실행
@@ -315,6 +327,15 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                         print(f"[search_book LLM] ❌ HTML 추출/저장 실패: {e}")
                         import traceback
                         traceback.print_exc()
+                
+                # 브라우저 종료 (async 컨텍스트 내부에서)
+                if browser:
+                    try:
+                        print(f"[search_book] 브라우저 종료 중...")
+                        browser.close()
+                        print(f"[search_book] ✅ 브라우저 종료 완료")
+                    except Exception as e:
+                        print(f"[search_book] ⚠️ 브라우저 종료 경고: {e}")
                 
                 return history, page_url, cdp, saved_path, html_size
             

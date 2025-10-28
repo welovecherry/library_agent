@@ -24,6 +24,7 @@ from typing import Dict, Any
 import pprint
 import os
 from datetime import datetime
+import argparse
 
 # LangGraph 기본 컴포넌트
 from langgraph.graph import StateGraph, END
@@ -112,19 +113,46 @@ def run_once(place: str, title: str, html_path: str | None = None) -> Dict[str, 
 
 
 if __name__ == "__main__":
-    # 터미널 실행:
-    #   PYTHONPATH=00_src python -m graph.pipeline_graph
+    # ------------------------------------------------------------------
+    # CLI 파서: 환경변수 + CLI 동시 지원 (CLI가 우선)
+    #   예)
+    #   PYTHONPATH=00_src python -m graph.pipeline_graph \
+    #     --place gangnam \
+    #     --title "어린 왕자" \
+    #     --html-override --html-path 00_src/data/raw/2025-10-28/gangnam_1761660636_results.html \
+    #     --out-jsonl 00_src/data/parsed/2025-10-28/gangnam_results.jsonl \
+    #     --out-json  00_src/data/parsed/2025-10-28/gangnam_results.json
+    # ------------------------------------------------------------------
+    parser = argparse.ArgumentParser(description="Library search → HTML save → JSON/JSONL parse pipeline")
+    parser.add_argument("--place", type=str, help="예: gangnam | songpa | seocho ...")
+    parser.add_argument("--title", type=str, help="검색어(도서명)")
+    parser.add_argument("--html-override", action="store_true", help="브라우저 검색 생략, 저장된 HTML만 파싱")
+    parser.add_argument("--html-path", type=str, help="저장된 HTML 경로 (override와 함께 사용 권장)")
+    parser.add_argument("--out-jsonl", type=str, help="JSONL 저장 경로")
+    parser.add_argument("--out-json", type=str, help="JSON 저장 경로")
+    args = parser.parse_args()
 
-    # 테스트 파라미터
-    test_place = os.environ.get("TEST_PLACE", "seocho")
-    test_title = os.environ.get("TEST_TITLE", "세이노의 가르침")
-    # 저장된 HTML만 파싱하고 싶다면 아래 경로를 환경변수로 전달
-    # (이 경우 search_book은 건너뛰고 parse_html만 실행됨)
-    test_html = os.environ.get("TEST_HTML")
+    # 1) place/title 우선순위: CLI > ENV > 기본값
+    test_place = args.place or os.environ.get("TEST_PLACE", "seocho")
+    test_title = args.title or os.environ.get("TEST_TITLE", "세이노의 가르침")
+
+    # 2) 출력 경로: CLI가 오면 ENV에 주입해서 run_once 내부 로직과 정합
+    if args.out_jsonl:
+        os.environ["TEST_OUT_JSONL"] = args.out_jsonl
+    if args.out_json:
+        os.environ["TEST_OUT_JSON"] = args.out_json
+
+    # 3) override 모드: CLI --html-override가 있으면 --html-path 사용
+    #    (없으면 ENV TEST_HTML 사용; 둘 다 없으면 브라우저 검색)
+    test_html = None
+    if args.html_override and args.html_path:
+        test_html = args.html_path
+    else:
+        test_html = os.environ.get("TEST_HTML")
 
     print(f"[pipeline_graph] run_once() with place={test_place}, title={test_title}, html_override={bool(test_html)}")
 
-    # Show planned save paths for visibility
+    # Show planned save paths for visibility (환경변수 반영 후 경로 계산)
     planned_date = datetime.now().strftime("%Y-%m-%d")
     planned_dir = os.path.join("00_src", "data", "parsed", planned_date)
     planned_jsonl = os.environ.get("TEST_OUT_JSONL", os.path.join(planned_dir, f"{test_place}_results.jsonl"))
@@ -144,7 +172,16 @@ if __name__ == "__main__":
     print(f"✓ 검색 성공: {out.get('ok')}")
     print(f"✓ 페이지 URL: {out.get('page_url')}")
     print(f"✓ HTML 저장 경로: {out.get('saved_html_path')}")
-    print(f"✓ HTML 크기: {out.get('html_size', 0):,} bytes")
+
+    # HTML 크기 표시: 상태에 없으면 파일 크기 직접 계산 시도
+    html_size = out.get("html_size", 0)
+    if (not html_size) and out.get("saved_html_path"):
+        try:
+            html_size = os.path.getsize(out["saved_html_path"])
+        except Exception:
+            html_size = 0
+    print(f"✓ HTML 크기: {html_size:,} bytes")
+
     print(f"\n✓ 파싱 성공: {out.get('parse_success')}")
     if out.get('parse_error'):
         print(f"✓ 파싱 에러: {out.get('parse_error')}")
