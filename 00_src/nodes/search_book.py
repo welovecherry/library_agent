@@ -212,7 +212,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
             if browser:
                 try:
                     print(f"[search_book] 브라우저 종료 중...")
-                    browser.close()
+                    await browser.stop()  # BrowserSession은 close() 대신 stop() 사용
                     print(f"[search_book] ✅ 브라우저 종료 완료")
                 except Exception as e:
                     print(f"[search_book] ⚠️ 브라우저 종료 경고: {e}")
@@ -332,7 +332,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                 if browser:
                     try:
                         print(f"[search_book] 브라우저 종료 중...")
-                        browser.close()
+                        await browser.stop()  # BrowserSession은 close() 대신 stop() 사용
                         print(f"[search_book] ✅ 브라우저 종료 완료")
                     except Exception as e:
                         print(f"[search_book] ⚠️ 브라우저 종료 경고: {e}")
