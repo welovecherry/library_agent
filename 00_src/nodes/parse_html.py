@@ -133,20 +133,36 @@ def _extract_title_from_block(block) -> Optional[str]:
     return title_candidates[-1]
 
 def _extract_status_from_block(block) -> Optional[str]:
-    # 상태 키워드가 포함된 텍스트를 찾음
-    txt = _clean(block.get_text(" "))
+    # 상태 키워드가 포함된 텍스트를 찾음 (부모 요소 포함)
+    # 강남구는 부모 요소의 <b class="emp3">에 상태가 있음
+    search_scope = block
+    if block.parent:
+        search_scope = block.parent
+    
+    txt = _clean(search_scope.get_text(" "))
     hits = [kw for kw in STATUS_KEYWORDS if kw in txt]
     if not hits:
         return None
-    # 문맥 일부 잘라서 반환
-    # "대출가능"이 있으면 그걸 우선으로
+    
+    # 특정 태그에서 우선 검색 (더 정확함)
+    for tag_class in ['emp3', 'emp2', 'emp1', 'status', 'state']:
+        status_tag = search_scope.find(['b', 'span', 'em'], class_=tag_class)
+        if status_tag:
+            tag_text = _clean(status_tag.get_text())
+            if tag_text and any(kw in tag_text for kw in STATUS_KEYWORDS):
+                # "대출가능[비치중]" → "대출가능" 추출
+                if "대출가능" in tag_text:
+                    return "대출가능"
+                elif "대출중" in tag_text or "대출 중" in tag_text or "대출불가" in tag_text:
+                    return "대출중"
+                return tag_text
+    
+    # 폴백: 전체 텍스트에서 검색
     if "대출가능" in hits:
         return "대출가능"
-    # 다음 우선순위: 대출중/예약 관련
     for kw in ["대출중", "예약불가", "예약가능", "예약중", "대출 불가", "대출불가", "비치중"]:
         if kw in txt:
             return kw
-    # 마지막으로 첫 키워드
     return hits[0]
 
 def _extract_publisher_year_library(block) -> (Optional[str], Optional[str], Optional[str]):

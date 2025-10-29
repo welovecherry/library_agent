@@ -30,11 +30,11 @@ SELECTORS_PATH = "00_src/configs/selectors.yaml"
 SPA_READY_KEYWORDS = ["검색결과", "소장", "대출", "관심도서", "상세보기"]
 
 def _build_browser_use_task(catalog_home_url: str, title: str, hint: Dict[str, Any], backoff: List[int]) -> str:
-    """DOM 신호 기반: 보이면 즉시 진행, 보이지 않으면 짧게 재시도 후 종료."""
+    """DOM 신호 기반: 보이면 즉시 진행, 보이지 않으면 충분히 대기 후 종료."""
     return f"""
 1) navigate to "{catalog_home_url}"
 2) if a VISIBLE search input exists (placeholder/aria-label/label text includes: 검색|도서|자료), DO NOT WAIT: focus it immediately.
-   else wait up to 5s; if still hidden, refresh ONCE and wait up to 5s again. if still hidden, STOP with no_results.
+   else wait up to 10s for SPA to load; if still hidden, STOP with no_results. DO NOT REFRESH.
 3) type "{title}" and press Enter. if not submitted, click the search/돋보기 button ONCE (no repeats).
 4) if URL changed OR the page contains any of [검색결과, 소장, 대출, 건], STOP immediately with success (done).
 5) NEVER repeat the same action twice. at most 2 attempts TOTAL. do not open new tabs. do not save HTML.
@@ -137,6 +137,11 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
 
             print(f"[search_book] SPA 로딩 대기 완료 ({'성공' if ready else '타임아웃'})")
             
+            # 추가 대기: 검색 결과 데이터가 완전히 로드될 시간 확보 (5초)
+            if ready:
+                print(f"[search_book] 검색 결과 데이터 로딩 대기 중... (5초)")
+                await asyncio.sleep(5)
+            
             # CDP endpoint & page_url 추출
             page_url = None
             cdp = None
@@ -199,7 +204,7 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                             print(f"[search_book] 메타 저장 경고: {_e}")
                         
                         html_size = len(html_content)
-                        print(f"[search_book] ✅ HTML 저장 완료: {saved_path} ({html_size:,} bytes)")
+                        print(f"[search_book] ✅ HTML 저장 완료 (페이지 1): {saved_path} ({html_size:,} bytes)")
                     else:
                         print(f"[search_book] ⚠️ HTML 내용이 비어있음")
                         
@@ -207,6 +212,48 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                     print(f"[search_book] ❌ HTML 추출/저장 실패: {e}")
                     import traceback
                     traceback.print_exc()
+            
+            # ========== 다중 페이지 처리: 2페이지 시도 ==========
+            page2_clicked = False
+            if browser:
+                try:
+                    print(f"[search_book] 2페이지 버튼 찾는 중...")
+                    # 페이지네이션 버튼 찾기 시도
+                    # 강남구는 .pages 클래스 안에 페이지 번호가 있음
+                    page2_check = await browser.cdp_client.send.Runtime.evaluate(
+                        params={
+                            "expression": """
+                                (function() {
+                                    // 방법 1: 페이지 번호 2 버튼 찾기
+                                    let page2 = document.querySelector('.pages button.pgNum:not(.on)');
+                                    if (page2 && page2.textContent.trim() === '2') {
+                                        page2.click();
+                                        return '2번 버튼 클릭';
+                                    }
+                                    // 방법 2: '다음' 버튼 찾기
+                                    let nextBtn = document.querySelector('.pages button.next:not([style*="hidden"])');
+                                    if (nextBtn) {
+                                        nextBtn.click();
+                                        return '다음 버튼 클릭';
+                                    }
+                                    return '페이지 버튼 없음';
+                                })()
+                            """,
+                            "returnByValue": True
+                        },
+                        session_id=browser.agent_focus.session_id
+                    )
+                    click_result = page2_check.get("result", {}).get("value", "")
+                    print(f"[search_book] 2페이지 클릭 결과: {click_result}")
+                    
+                    if "클릭" in click_result:
+                        page2_clicked = True
+                        # 페이지 로딩 대기
+                        print(f"[search_book] 2페이지 로딩 대기 중... (3초)")
+                        await asyncio.sleep(3)
+                        print(f"[search_book] 2페이지 로딩 완료")
+                except Exception as e:
+                    print(f"[search_book] 2페이지 클릭 실패: {e}")
             
             # 브라우저 종료 (async 컨텍스트 내부에서)
             if browser:
@@ -258,6 +305,11 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                     await asyncio.sleep(0.5)
 
                 print(f"[search_book LLM] SPA 로딩 대기 완료 ({'성공' if ready else '타임아웃'})")
+                
+                # 추가 대기: 검색 결과 데이터가 완전히 로드될 시간 확보 (5초)
+                if ready:
+                    print(f"[search_book LLM] 검색 결과 데이터 로딩 대기 중... (5초)")
+                    await asyncio.sleep(5)
                 
                 # CDP endpoint & page_url 추출
                 page_url = None
