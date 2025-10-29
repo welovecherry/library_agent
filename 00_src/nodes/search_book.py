@@ -214,75 +214,120 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                     import traceback
                     traceback.print_exc()
             
-            # ========== 다중 페이지 처리: LLM에게 2페이지 클릭 요청 ==========
+            # ========== 다중 페이지 처리: JavaScript 직접 실행으로 마지막 페이지까지 ==========
             saved_html_paths = [saved_path]  # 1페이지 경로 저장
             
-            # 2페이지 저장을 위한 변수 준비
+            # 공통 변수 준비
             today = datetime.now().strftime("%Y-%m-%d")
-            timestamp = int(datetime.now().timestamp())
+            base_timestamp = int(datetime.now().timestamp())
             dir_path = Path(f"00_src/data/raw/{today}")
             
             if browser:
-                try:
-                    print(f"[search_book] 🤖 LLM에게 2페이지 클릭 요청...")
-                    
-                    # 2페이지 클릭 태스크 (JavaScript 링크 명시)
-                    page2_task = """
-Task: Click pagination button '2' to go to page 2.
-
-Steps:
-1) Scroll down slowly (2-3 pages) to find pagination area at the bottom
-2) Look for a link or button with text '2' (it may be <a href="javascript:fnList(2);">2</a>)
-3) Click that '2' link/button
-4) Immediately call 'done' after clicking
-
-Important: The '2' button is a JavaScript link, not a regular button. Look carefully.
-Maximum 4 steps allowed.
+                current_page = 1
+                max_pages = 10  # 안전장치 (무한 루프 방지)
+                
+                while current_page < max_pages:
+                    try:
+                        next_page_num = current_page + 1
+                        print(f"[search_book] 🔍 {next_page_num}페이지 버튼 찾는 중...")
+                        
+                        # JavaScript로 다음 페이지 버튼 클릭 (다중 패턴 지원)
+                        js_code = f"""
+(function() {{
+    // 패턴 1: 송파구 스타일 - javascript:fnList(N)
+    let link = document.querySelector('a[href*="fnList({next_page_num})"]');
+    if (link) {{
+        link.click();
+        return 'clicked_fnList';
+    }}
+    
+    // 패턴 2: 강남구 스타일 - button.pgNum
+    let pgNumButtons = document.querySelectorAll('button.pgNum');
+    for (let btn of pgNumButtons) {{
+        if (btn.textContent.trim() === '{next_page_num}') {{
+            btn.click();
+            return 'clicked_pgNum';
+        }}
+    }}
+    
+    // 패턴 3: 서초구 스타일 - button with @click
+    let allButtons = document.querySelectorAll('button');
+    for (let btn of allButtons) {{
+        if (btn.textContent.trim() === '{next_page_num}') {{
+            btn.click();
+            return 'clicked_button';
+        }}
+    }}
+    
+    // 패턴 4: 일반 링크 (텍스트가 N인 모든 <a> 태그)
+    let allLinks = document.querySelectorAll('a');
+    for (let a of allLinks) {{
+        if (a.textContent.trim() === '{next_page_num}' && a.href.includes('javascript')) {{
+            a.click();
+            return 'clicked_link';
+        }}
+    }}
+    
+    return 'not_found';
+}})()
 """
-                    
-                    page2_agent = Agent(
-                        task=page2_task,
-                        llm=llm,
-                        browser=browser,
-                        use_vision=False,
-                        max_steps=4,  # 스크롤 + 클릭 여유있게
-                    )
-                    
-                    print(f"[search_book] Agent 실행 중 (2페이지 클릭)...")
-                    page2_history = await page2_agent.run()
-                    print(f"[search_book] ✅ 2페이지 클릭 Agent 완료 (steps={len(page2_history)})")
-                    
-                    # 페이지 로딩 대기
-                    print(f"[search_book] 2페이지 로딩 대기 중... (5초)")
-                    await asyncio.sleep(5)
-                    
-                    # 2페이지 HTML 추출
-                    print(f"[search_book] 2페이지 HTML 추출 중...")
-                    page2_html = await browser.cdp_client.send.Runtime.evaluate(
-                        params={
-                            "expression": "document.documentElement.outerHTML",
-                            "returnByValue": True
-                        },
-                        session_id=browser.agent_focus.session_id
-                    )
-                    page2_html_content = page2_html.get("result", {}).get("value", "")
-                    
-                    if page2_html_content and len(page2_html_content) > 1000:
-                        # 2페이지 파일명 생성
-                        page2_filename = f"{place}_{timestamp}_results_page2.html"
-                        page2_path = dir_path / page2_filename
                         
-                        # 2페이지 HTML 저장
-                        page2_path.write_text(page2_html_content, encoding="utf-8")
-                        page2_size = len(page2_html_content)
-                        print(f"[search_book] ✅ 2페이지 HTML 저장 완료: {page2_path} ({page2_size:,} bytes)")
+                        # JavaScript 실행
+                        result = await browser.cdp_client.send.Runtime.evaluate(
+                            params={
+                                "expression": js_code,
+                                "returnByValue": True
+                            },
+                            session_id=browser.agent_focus.session_id
+                        )
                         
-                        saved_html_paths.append(str(page2_path))
-                    else:
-                        print(f"[search_book] ⚠️ 2페이지 HTML 추출 실패 또는 내용 부족")
-                    
-                except Exception as e:
-                    print(f"[search_book] ⚠️ 2페이지 처리 실패 (계속 진행): {e}")
+                        click_result = result.get("result", {}).get("value", "not_found")
+                        clicked = click_result != "not_found"
+                        
+                        print(f"[search_book] {'✅' if clicked else '📍'} {next_page_num}페이지 클릭 결과: {click_result}")
+                        
+                        if not clicked:
+                            # 다음 버튼 없음 → 마지막 페이지 도달
+                            print(f"[search_book] 📍 마지막 페이지 도달 (현재: {current_page}페이지)")
+                            break
+                        
+                        current_page = next_page_num
+                        
+                        # 페이지 로딩 대기
+                        print(f"[search_book] {current_page}페이지 로딩 대기 중... (5초)")
+                        await asyncio.sleep(5)
+                        
+                        # HTML 추출
+                        print(f"[search_book] {current_page}페이지 HTML 추출 중...")
+                        page_html = await browser.cdp_client.send.Runtime.evaluate(
+                            params={
+                                "expression": "document.documentElement.outerHTML",
+                                "returnByValue": True
+                            },
+                            session_id=browser.agent_focus.session_id
+                        )
+                        page_html_content = page_html.get("result", {}).get("value", "")
+                        
+                        if page_html_content and len(page_html_content) > 1000:
+                            # 파일명 생성
+                            page_filename = f"{place}_{base_timestamp}_results_page{current_page}.html"
+                            page_path = dir_path / page_filename
+                            
+                            # HTML 저장
+                            page_path.write_text(page_html_content, encoding="utf-8")
+                            page_size = len(page_html_content)
+                            print(f"[search_book] ✅ {current_page}페이지 HTML 저장 완료: {page_path} ({page_size:,} bytes)")
+                            
+                            saved_html_paths.append(str(page_path))
+                        else:
+                            print(f"[search_book] ⚠️ {current_page}페이지 HTML 추출 실패 또는 내용 부족")
+                            break  # HTML 추출 실패하면 중단
+                        
+                    except Exception as e:
+                        print(f"[search_book] ⚠️ {current_page}페이지 처리 실패: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        break  # 에러 발생 시 중단
             
             # 브라우저 종료 (async 컨텍스트 내부에서)
             if browser:
