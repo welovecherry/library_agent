@@ -293,9 +293,9 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                         
                         current_page = next_page_num
                         
-                        # 페이지 로딩 대기
-                        print(f"[search_book] {current_page}페이지 로딩 대기 중... (5초)")
-                        await asyncio.sleep(5)
+                        # 페이지 로딩 대기 (SPA 사이트를 위해 충분한 시간 확보)
+                        print(f"[search_book] {current_page}페이지 로딩 대기 중... (7초)")
+                        await asyncio.sleep(7)
                         
                         # HTML 추출
                         print(f"[search_book] {current_page}페이지 HTML 추출 중...")

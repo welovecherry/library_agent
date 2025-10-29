@@ -229,6 +229,19 @@ def _parse_item_block(block) -> Optional[Dict[str, Any]]:
     reserve_count = _extract_reserve_count(block_text)
     due_date = _extract_first_date(block_text)
 
+    # library가 없으면 room에서 추출 시도 (서초구 등 SPA 사이트용)
+    if not library and room:
+        # [양재]종합자료실 → 양재도서관
+        # [반포본동]작은도서관 → 반포본동작은도서관 (이미 '도서관' 포함)
+        match = re.search(r'\[([^\]]+)\]', room)
+        if match:
+            location = match.group(1)
+            # 이미 '도서관' 키워드가 포함되어 있으면 그대로, 없으면 추가
+            if any(h in location for h in LIBRARY_HINTS):
+                library = location
+            else:
+                library = location + "도서관"
+
     # 필수 4개 중 title, library, status_raw가 비어도 일단 객체를 만들고 후처리에서 필터링
     available = _status_to_available(status_raw or "")
 
