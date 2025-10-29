@@ -279,79 +279,109 @@ def _find_item_blocks(soup: BeautifulSoup) -> List[Any]:
 def parse_html(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     LangGraph 노드 진입점.
+    다중 HTML 파일 지원: saved_html_paths 리스트가 있으면 모두 파싱하고 통합.
     """
     out = dict(state)
-    html_path = out.get("saved_html_path") or out.get("html_path")
-    if not html_path:
+    
+    # 다중 파일 경로 가져오기 (우선순위: saved_html_paths > saved_html_path > html_path)
+    html_paths = out.get("saved_html_paths") or [out.get("saved_html_path") or out.get("html_path")]
+    html_paths = [p for p in html_paths if p]  # None 제거
+    
+    if not html_paths:
         out["parse_success"] = False
-        out["parse_error"] = "No html_path provided in state (expected 'saved_html_path' or 'html_path')."
+        out["parse_error"] = "No html_path provided in state (expected 'saved_html_paths', 'saved_html_path' or 'html_path')."
         out["parsed_books"] = []
         return out
 
-    p = Path(html_path)
-    if not p.exists():
-        out["parse_success"] = False
-        out["parse_error"] = f"HTML file not found: {p}"
-        out["parsed_books"] = []
-        return out
+    all_parsed: List[Dict[str, Any]] = []
+    errors = []
+    
+    # 각 HTML 파일을 순차적으로 파싱
+    for idx, html_path in enumerate(html_paths, start=1):
+        p = Path(html_path)
+        if not p.exists():
+            errors.append(f"[Page {idx}] HTML file not found: {p}")
+            continue
 
-    try:
-        html = p.read_text(encoding="utf-8", errors="ignore")
-        soup = BeautifulSoup(html, "html.parser")
+        try:
+            html = p.read_text(encoding="utf-8", errors="ignore")
+            soup = BeautifulSoup(html, "html.parser")
 
-        item_blocks = _find_item_blocks(soup)
-        parsed: List[Dict[str, Any]] = []
-        for blk in item_blocks:
-            rec = _parse_item_block(blk)
-            if not rec:
-                continue
-            # 필수 필드 보정: 없는 건 None으로라도 확정
-            rec.setdefault("title", None)
-            rec.setdefault("library", None)
-            rec.setdefault("status_raw", None)
-            rec.setdefault("available", False)
+            item_blocks = _find_item_blocks(soup)
+            page_parsed: List[Dict[str, Any]] = []
+            
+            for blk in item_blocks:
+                rec = _parse_item_block(blk)
+                if not rec:
+                    continue
+                # 필수 필드 보정: 없는 건 None으로라도 확정
+                rec.setdefault("title", None)
+                rec.setdefault("library", None)
+                rec.setdefault("status_raw", None)
+                rec.setdefault("available", False)
 
-            # 메타
-            rec["_meta"] = {
-                "source_file": str(p),
-                "place": state.get("place"),
-                "page": state.get("page"),
-                "captured_at": state.get("captured_at"),
-                "parser": "dom-only-v1",
-                "parser_version": "1.0.0",
-            }
-            parsed.append(rec)
+                # 메타
+                rec["_meta"] = {
+                    "source_file": str(p),
+                    "place": state.get("place"),
+                    "page": idx,  # 페이지 번호 추가
+                    "captured_at": state.get("captured_at"),
+                    "parser": "dom-only-v1",
+                    "parser_version": "1.0.0",
+                }
+                page_parsed.append(rec)
+            
+            all_parsed.extend(page_parsed)
+            print(f"[parse_html] 페이지 {idx} 파싱 완료: {len(page_parsed)}건 추출 ({p.name})")
+            
+        except Exception as e:
+            errors.append(f"[Page {idx}] Parse error: {e}")
+            continue
 
-        # 최소한 하나라도 있어야 성공으로 친다.
-        out["parsed_books"] = parsed
-        out["parse_success"] = len(parsed) > 0
+    # 중복 제거 (동일한 title + library 조합)
+    seen_keys = set()
+    unique_parsed = []
+    duplicates = 0
+    
+    for rec in all_parsed:
+        key = (rec.get("title"), rec.get("library"))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            unique_parsed.append(rec)
+        else:
+            duplicates += 1
+    
+    if duplicates > 0:
+        print(f"[parse_html] 중복 제거: {duplicates}건 (최종 {len(unique_parsed)}건)")
+
+    # 최소한 하나라도 있어야 성공으로 친다.
+    out["parsed_books"] = unique_parsed
+    out["parse_success"] = len(unique_parsed) > 0
+    
+    if errors:
+        out["parse_error"] = " | ".join(errors)
+    else:
         out["parse_error"] = None if out["parse_success"] else "No item blocks parsed (DOM mode)."
 
-        # ── 신규: 함수 모드에서도 저장 수행 (그래프/CLI 동작 통일) ──
-        saved = []
-        out_json = state.get("out_json") or out.get("out_json")
-        out_jsonl = state.get("out_jsonl") or out.get("out_jsonl")
-        try:
-            if out_json:
-                _dump_json(out_json, out["parse_success"], out["parse_error"], parsed)
-                saved.append(("json", out_json))
-            if out_jsonl:
-                _dump_jsonl(out_jsonl, parsed)
-                saved.append(("jsonl", out_jsonl))
-        except Exception as e:
-            # 저장 중 오류는 parse_error에 덧붙여 기록하되, 파싱 결과 자체는 유지
-            prev = out.get("parse_error")
-            msg = f"SaveError({type(e).__name__}): {e}"
-            out["parse_error"] = f"{prev} | {msg}" if prev else msg
-        out["saved"] = saved
-
-        return out
-
+    # ── 신규: 함수 모드에서도 저장 수행 (그래프/CLI 동작 통일) ──
+    saved = []
+    out_json = state.get("out_json") or out.get("out_json")
+    out_jsonl = state.get("out_jsonl") or out.get("out_jsonl")
+    try:
+        if out_json:
+            _dump_json(out_json, out["parse_success"], out["parse_error"], unique_parsed)
+            saved.append(("json", out_json))
+        if out_jsonl:
+            _dump_jsonl(out_jsonl, unique_parsed)
+            saved.append(("jsonl", out_jsonl))
     except Exception as e:
-        out["parsed_books"] = []
-        out["parse_success"] = False
-        out["parse_error"] = f"Exception during parse: {type(e).__name__}: {e}"
-        return out
+        # 저장 중 오류는 parse_error에 덧붙여 기록하되, 파싱 결과 자체는 유지
+        prev = out.get("parse_error")
+        msg = f"SaveError({type(e).__name__}): {e}"
+        out["parse_error"] = f"{prev} | {msg}" if prev else msg
+    out["saved"] = saved
+
+    return out
 
 
 def _dump_json(path: str, ok: bool, error: Optional[str], parsed_books: List[Dict[str, Any]]) -> None:

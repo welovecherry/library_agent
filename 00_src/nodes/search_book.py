@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 import urllib.parse as _urlparse  # 도메인 추출용
 from datetime import datetime
+from pathlib import Path
 
 # Agent 모드용 라이브러리 (로컬 브라우저 직접 제어)
 try:
@@ -213,47 +214,75 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                     import traceback
                     traceback.print_exc()
             
-            # ========== 다중 페이지 처리: 2페이지 시도 ==========
-            page2_clicked = False
+            # ========== 다중 페이지 처리: LLM에게 2페이지 클릭 요청 ==========
+            saved_html_paths = [saved_path]  # 1페이지 경로 저장
+            
+            # 2페이지 저장을 위한 변수 준비
+            today = datetime.now().strftime("%Y-%m-%d")
+            timestamp = int(datetime.now().timestamp())
+            dir_path = Path(f"00_src/data/raw/{today}")
+            
             if browser:
                 try:
-                    print(f"[search_book] 2페이지 버튼 찾는 중...")
-                    # 페이지네이션 버튼 찾기 시도
-                    # 강남구는 .pages 클래스 안에 페이지 번호가 있음
-                    page2_check = await browser.cdp_client.send.Runtime.evaluate(
+                    print(f"[search_book] 🤖 LLM에게 2페이지 클릭 요청...")
+                    
+                    # 2페이지 클릭 태스크 (JavaScript 링크 명시)
+                    page2_task = """
+Task: Click pagination button '2' to go to page 2.
+
+Steps:
+1) Scroll down slowly (2-3 pages) to find pagination area at the bottom
+2) Look for a link or button with text '2' (it may be <a href="javascript:fnList(2);">2</a>)
+3) Click that '2' link/button
+4) Immediately call 'done' after clicking
+
+Important: The '2' button is a JavaScript link, not a regular button. Look carefully.
+Maximum 4 steps allowed.
+"""
+                    
+                    page2_agent = Agent(
+                        task=page2_task,
+                        llm=llm,
+                        browser=browser,
+                        use_vision=False,
+                        max_steps=4,  # 스크롤 + 클릭 여유있게
+                    )
+                    
+                    print(f"[search_book] Agent 실행 중 (2페이지 클릭)...")
+                    page2_history = await page2_agent.run()
+                    print(f"[search_book] ✅ 2페이지 클릭 Agent 완료 (steps={len(page2_history)})")
+                    
+                    # 페이지 로딩 대기
+                    print(f"[search_book] 2페이지 로딩 대기 중... (5초)")
+                    await asyncio.sleep(5)
+                    
+                    # 2페이지 HTML 추출
+                    print(f"[search_book] 2페이지 HTML 추출 중...")
+                    page2_html = await browser.cdp_client.send.Runtime.evaluate(
                         params={
-                            "expression": """
-                                (function() {
-                                    // 방법 1: 페이지 번호 2 버튼 찾기
-                                    let page2 = document.querySelector('.pages button.pgNum:not(.on)');
-                                    if (page2 && page2.textContent.trim() === '2') {
-                                        page2.click();
-                                        return '2번 버튼 클릭';
-                                    }
-                                    // 방법 2: '다음' 버튼 찾기
-                                    let nextBtn = document.querySelector('.pages button.next:not([style*="hidden"])');
-                                    if (nextBtn) {
-                                        nextBtn.click();
-                                        return '다음 버튼 클릭';
-                                    }
-                                    return '페이지 버튼 없음';
-                                })()
-                            """,
+                            "expression": "document.documentElement.outerHTML",
                             "returnByValue": True
                         },
                         session_id=browser.agent_focus.session_id
                     )
-                    click_result = page2_check.get("result", {}).get("value", "")
-                    print(f"[search_book] 2페이지 클릭 결과: {click_result}")
+                    page2_html_content = page2_html.get("result", {}).get("value", "")
                     
-                    if "클릭" in click_result:
-                        page2_clicked = True
-                        # 페이지 로딩 대기
-                        print(f"[search_book] 2페이지 로딩 대기 중... (3초)")
-                        await asyncio.sleep(3)
-                        print(f"[search_book] 2페이지 로딩 완료")
+                    if page2_html_content and len(page2_html_content) > 1000:
+                        # 2페이지 파일명 생성
+                        page2_filename = f"{place}_{timestamp}_results_page2.html"
+                        page2_path = dir_path / page2_filename
+                        
+                        # 2페이지 HTML 저장
+                        page2_path.write_text(page2_html_content, encoding="utf-8")
+                        page2_size = len(page2_html_content)
+                        print(f"[search_book] ✅ 2페이지 HTML 저장 완료: {page2_path} ({page2_size:,} bytes)")
+                        
+                        saved_html_paths.append(str(page2_path))
+                    else:
+                        print(f"[search_book] ⚠️ 2페이지 HTML 추출 실패 또는 내용 부족")
+                    
                 except Exception as e:
-                    print(f"[search_book] 2페이지 클릭 실패: {e}")
+                    print(f"[search_book] ⚠️ 2페이지 처리 실패 (계속 진행): {e}")
             
             # 브라우저 종료 (async 컨텍스트 내부에서)
             if browser:
@@ -264,12 +293,29 @@ def search_book(state: Dict[str, Any]) -> Dict[str, Any]:
                 except Exception as e:
                     print(f"[search_book] ⚠️ 브라우저 종료 경고: {e}")
             
-            return history, page_url, cdp, saved_path, html_size
+            return history, page_url, cdp, saved_html_paths, html_size
         
         # asyncio 실행
-        history1, page_url, cdp_endpoint, saved_html_path, html_size = asyncio.run(run_and_extract())
+        history1, page_url, cdp_endpoint, saved_html_paths, html_size = asyncio.run(run_and_extract())
         
-        return {**state, "ok": True, "result_hint": "results_detected", "page_url": page_url, "cdp_endpoint": cdp_endpoint, "saved_html_path": saved_html_path, "html_size": html_size, "used_frame": None, "markers": [], "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"], "place": place}
+        total_pages = len(saved_html_paths)
+        print(f"[search_book] 📊 총 {total_pages}개 페이지 HTML 저장 완료")
+        
+        return {
+            **state, 
+            "ok": True, 
+            "result_hint": "results_detected", 
+            "page_url": page_url, 
+            "cdp_endpoint": cdp_endpoint, 
+            "saved_html_path": saved_html_paths[0] if saved_html_paths else None,  # 1페이지 경로 (하위 호환)
+            "saved_html_paths": saved_html_paths,  # 전체 페이지 경로 리스트
+            "total_pages": total_pages,
+            "html_size": html_size, 
+            "used_frame": None, 
+            "markers": [], 
+            "log": [f"rules_steps={len(history1) if isinstance(history1, list) else 'unknown'}"], 
+            "place": place
+        }
     except Exception as e1:
         # 2단계: 유연 태스크(한 번만), max_steps=15
         task_llm = f"수정된 시도: 위와 동일하지만 다른 경로도 허용. 실패 시 즉시 종료.\n" + _build_browser_use_task(home, title, {}, [30, 60, 90])

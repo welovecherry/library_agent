@@ -171,7 +171,18 @@ if __name__ == "__main__":
     print("="*80)
     print(f"✓ 검색 성공: {out.get('ok')}")
     print(f"✓ 페이지 URL: {out.get('page_url')}")
-    print(f"✓ HTML 저장 경로: {out.get('saved_html_path')}")
+    
+    # 다중 페이지 출력
+    total_pages = out.get('total_pages', 1)
+    saved_html_paths = out.get('saved_html_paths', [out.get('saved_html_path')])
+    saved_html_paths = [p for p in saved_html_paths if p]
+    
+    if total_pages > 1:
+        print(f"✓ 총 페이지 수: {total_pages}개")
+        for idx, path in enumerate(saved_html_paths, 1):
+            print(f"  [{idx}] {path}")
+    else:
+        print(f"✓ HTML 저장 경로: {out.get('saved_html_path')}")
 
     # HTML 크기 표시: 상태에 없으면 파일 크기 직접 계산 시도
     html_size = out.get("html_size", 0)
