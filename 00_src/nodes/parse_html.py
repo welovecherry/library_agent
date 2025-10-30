@@ -60,6 +60,9 @@ YEAR_PAT = re.compile(r"(19|20)\d{2}")
 DUE_DATE_PAT = re.compile(r"반납\s*예정\s*일\s*[:：]?\s*([0-9]{4}[.\-\/][0-9]{1,2}[.\-\/][0-9]{1,2})")
 RESERVE_PAT = re.compile(r"예약\s*:?[\s]*([0-9]+)\s*명")
 CALLNO_PAT = re.compile(r"청구기호\s*[:：]?\s*([^\s<]+)")
+# 송파구 등: 청구기호 레이블 없이 숫자-한글 패턴 (예: "큰글자 848-칼292ㅅ", "813.6-김17ㅅ")
+# 청구기호는 3-4자리 숫자로 시작하고, 반드시 한글이 포함되어야 함 (날짜 제외용)
+CALLNO_DIRECT_PAT = re.compile(r"\b[가-힣]*\s*\d{3,4}[.\-][가-힣][가-힣\d]*\b")
 
 def _clean(txt: Optional[str]) -> str:
     if not txt:
@@ -85,15 +88,37 @@ def _extract_reserve_count(s: str) -> Optional[int]:
     return None
 
 def _extract_call_number(block_text: str) -> Optional[str]:
-    # 가장 간단한 방식: "청구기호:" 뒤의 토큰을 줍는다.
+    # 방법 1: "청구기호:" 레이블이 있는 경우
     m = CALLNO_PAT.search(block_text)
     if m:
         return _clean(m.group(1))
+    
+    # 방법 2: 레이블 없이 청구기호 패턴만 있는 경우 (송파구 등)
+    # 예: "큰글자 848-칼292ㅅ", "813.6-김17ㅅ"
+    m = CALLNO_DIRECT_PAT.search(block_text)
+    if m:
+        return _clean(m.group(0))
+    
     return None
 
 def _pick_library(candidates: List[str]) -> Optional[str]:
     # "…도서관/…작은도서관/…분관" 등 가장 길고 구체적인 마지막 항목을 선호
-    libs = [c for c in candidates if any(h in c for h in LIBRARY_HINTS)]
+    # 단, 상태 키워드나 연도가 포함된 것은 제외
+    libs = []
+    for c in candidates:
+        # 도서관 힌트가 포함되어 있어야 함
+        if not any(h in c for h in LIBRARY_HINTS):
+            continue
+        # 상태 키워드나 연도가 포함된 것은 제외 (서초구 SPA 대응)
+        if any(kw in c for kw in STATUS_KEYWORDS):
+            continue
+        if YEAR_PAT.search(c):
+            continue
+        # 너무 긴 것 제외 (출판사+연도+상태+도서관이 합쳐진 경우)
+        if len(c) > 50:
+            continue
+        libs.append(c)
+    
     if not libs:
         return None
     # 길이 우선, 동점이면 마지막
@@ -115,6 +140,11 @@ def _extract_title_from_block(block) -> Optional[str]:
         if el:
             t = _clean(el.get_text(" "))
             if t:
+                # 앞에 붙은 번호 제거 (예: "1. 제목", "22. 제목" → "제목")
+                t = re.sub(r"^\d+\.\s*", "", t)
+                # "도서" 텍스트 제거 (예: "도서 1. 제목" → "1. 제목")
+                t = re.sub(r"^도서\s*\d*\.\s*", "", t)
+                t = re.sub(r"^도서\s+", "", t)
                 title_candidates.append(t)
 
     # 이미지 alt도 종종 제목
@@ -135,8 +165,10 @@ def _extract_title_from_block(block) -> Optional[str]:
 def _extract_status_from_block(block) -> Optional[str]:
     # 상태 키워드가 포함된 텍스트를 찾음 (부모 요소 포함)
     # 강남구는 부모 요소의 <b class="emp3">에 상태가 있음
+    # 성북구는 block 안의 하위 요소에 <b> 태그가 있음
     search_scope = block
-    if block.parent:
+    # 부모도 포함해서 검색 범위 확장
+    if block.parent and block.parent.name != '[document]':
         search_scope = block.parent
     
     txt = _clean(search_scope.get_text(" "))
@@ -145,11 +177,15 @@ def _extract_status_from_block(block) -> Optional[str]:
         return None
     
     # 특정 태그에서 우선 검색 (더 정확함)
+    # 단, "도서예약불가", "상호대차불가"는 제외
     for tag_class in ['emp3', 'emp2', 'emp1', 'status', 'state']:
         status_tag = search_scope.find(['b', 'span', 'em'], class_=tag_class)
         if status_tag:
             tag_text = _clean(status_tag.get_text())
             if tag_text and any(kw in tag_text for kw in STATUS_KEYWORDS):
+                # 강남구: "도서예약불가", "상호대차불가" 제외
+                if "도서예약불가" in tag_text or "상호대차불가" in tag_text or "무인예약불가" in tag_text:
+                    continue
                 # "대출가능[비치중]" → "대출가능" 추출
                 if "대출가능" in tag_text:
                     return "대출가능"
@@ -157,12 +193,89 @@ def _extract_status_from_block(block) -> Optional[str]:
                     return "대출중"
                 return tag_text
     
+    # 추가: class 없는 <b>, <strong> 태그에서도 검색 (성북구 등)
+    # 예: <p class="txt">자료상태 : <b>대출가능(비치자료)</b></p>
+    # 중요: "대출가능/대출중/대출불가"를 우선적으로 찾고, 
+    #      "도서예약불가/상호대차불가" 같은 부가 정보는 무시
+    
+    # 1단계: <b>, <strong> 태그에서 우선 검색 (자료상태의 핵심 정보)
+    # block과 search_scope (부모) 모두에서 검색
+    for search_area in [block, search_scope]:
+        for tag_name in ['b', 'strong']:
+            all_tags = search_area.find_all(tag_name)
+            for tag in all_tags:
+                tag_text = _clean(tag.get_text())
+                if not tag_text:
+                    continue
+                
+                # 강남구: "대출불가[대출중]" → 대괄호 안의 "대출중" 추출
+                # 대괄호가 있으면 그 안의 텍스트를 우선 확인
+                bracket_match = re.search(r'\[([^\]]+)\]', tag_text)
+                if bracket_match:
+                    bracket_content = bracket_match.group(1)
+                    if "대출가능" in bracket_content:
+                        return "대출가능"
+                    elif "대출중" in bracket_content or "대출 중" in bracket_content:
+                        return "대출중"
+                    elif "대출불가" in bracket_content or "대출 불가" in bracket_content:
+                        return "대출불가"
+                    elif "예약중" in bracket_content:
+                        # "대출예약중", "상호대차예약중" 등 → 대출불가
+                        return "대출불가"
+                    # 대괄호 안에 매칭되는 것이 없으면 대괄호 밖의 텍스트 확인
+                    # (계속 진행)
+                
+                # 대괄호가 없거나 매칭 안되면 전체 텍스트에서 확인
+                # "대출가능(비치자료)" → "대출가능" 추출
+                if "대출가능" in tag_text:
+                    return "대출가능"
+                elif "대출중" in tag_text or "대출 중" in tag_text:
+                    return "대출중"
+                elif "대출불가" in tag_text or "대출 불가" in tag_text:
+                    return "대출불가"
+    
+    # 2단계: <em>, <span> 태그에서 검색 (부가 정보)
+    # 단, "도서예약불가" 같은 것은 우선순위가 낮으므로 나중에 반환
+    primary_status = None
+    secondary_status = None
+    
+    for tag_name in ['em', 'span']:
+        all_tags = search_scope.find_all(tag_name)
+        for tag in all_tags:
+            tag_text = _clean(tag.get_text())
+            if not tag_text or not any(kw in tag_text for kw in STATUS_KEYWORDS):
+                continue
+            
+            # 강남구: "도서예약불가", "상호대차불가"는 무시 (부가 정보일 뿐)
+            if "도서예약불가" in tag_text or "상호대차불가" in tag_text:
+                continue
+            
+            if "대출가능" in tag_text:
+                primary_status = "대출가능"
+            elif "대출중" in tag_text or "대출 중" in tag_text:
+                if not primary_status:
+                    primary_status = "대출중"
+            elif "대출불가" in tag_text or "대출 불가" in tag_text:
+                if not primary_status:
+                    primary_status = "대출불가"
+            # 부가 정보 (우선순위 낮음)
+            elif not primary_status and not secondary_status:
+                if len(tag_text) < 30:
+                    secondary_status = tag_text.split('(')[0].split('[')[0].strip()
+    
+    if primary_status:
+        return primary_status
+    if secondary_status:
+        return secondary_status
+    
     # 폴백: 전체 텍스트에서 검색
-    if "대출가능" in hits:
-        return "대출가능"
-    for kw in ["대출중", "예약불가", "예약가능", "예약중", "대출 불가", "대출불가", "비치중"]:
-        if kw in txt:
-            return kw
+    # "도서예약불가", "상호대차불가"는 제외
+    if "도서예약불가" not in txt and "상호대차불가" not in txt:
+        if "대출가능" in hits:
+            return "대출가능"
+        for kw in ["대출중", "대출 불가", "대출불가", "비치중"]:
+            if kw in txt:
+                return kw
     return hits[0]
 
 def _extract_publisher_year_library(block) -> (Optional[str], Optional[str], Optional[str]):
@@ -213,6 +326,36 @@ def _extract_room(block_text: str) -> Optional[str]:
         return _clean(m.group(0))
     return None
 
+def _extract_cover_image(block) -> Optional[str]:
+    """
+    책 표지 이미지 URL 추출 (강남, 송파, 서초 모두 지원)
+    """
+    # block과 부모 요소 모두에서 이미지 찾기 (강남: 부모 li에 img가 있음)
+    search_areas = [block]
+    if block.parent and block.parent.name != '[document]':
+        search_areas.append(block.parent)
+    
+    for area in search_areas:
+        for img in area.find_all("img"):
+            src = img.get("src", "")
+            
+            # 1. src가 http로 시작하는 외부 이미지 (강남, 서초)
+            if src and src.startswith("http"):
+                # "noimg" 같은 기본 이미지는 제외
+                if "noimg" not in src.lower() and "no-image" not in src.lower():
+                    return src
+            
+            # 2. 상대 경로 이미지도 수집 (송파 등)
+            # 단, noimg는 제외
+            if src and "noimg" not in src.lower():
+                # 상대 경로를 절대 경로로 변환할 수 있도록 반환
+                # (나중에 도서관별 base_url을 붙일 수 있음)
+                if not src.startswith("http"):
+                    # 일단 그대로 반환 (base_url은 나중에 추가 가능)
+                    pass
+    
+    return None
+
 def _parse_item_block(block) -> Optional[Dict[str, Any]]:
     """
     단일 카드/아이템 블록에서 도서 정보를 추출한다.
@@ -228,6 +371,7 @@ def _parse_item_block(block) -> Optional[Dict[str, Any]]:
     call_number = _extract_call_number(block_text)
     reserve_count = _extract_reserve_count(block_text)
     due_date = _extract_first_date(block_text)
+    cover_image = _extract_cover_image(block)
 
     # library가 없으면 room에서 추출 시도 (서초구 등 SPA 사이트용)
     if not library and room:
@@ -241,6 +385,11 @@ def _parse_item_block(block) -> Optional[Dict[str, Any]]:
                 library = location
             else:
                 library = location + "도서관"
+
+    # library 값 정제: "도서관: 글빛도서관" → "글빛도서관"
+    if library:
+        library = re.sub(r'^도서관\s*[:：]\s*', '', library).strip()
+        library = re.sub(r'^작은도서관\s*[:：]\s*', '', library).strip()
 
     # 필수 4개 중 title, library, status_raw가 비어도 일단 객체를 만들고 후처리에서 필터링
     available = _status_to_available(status_raw or "")
@@ -261,6 +410,7 @@ def _parse_item_block(block) -> Optional[Dict[str, Any]]:
         "publisher": publisher,
         "reserve_count": reserve_count,
         "due_date": due_date,
+        "cover_image": cover_image,
     }
 
 def _find_item_blocks(soup: BeautifulSoup) -> List[Any]:
